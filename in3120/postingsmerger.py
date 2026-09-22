@@ -1,8 +1,6 @@
 # pylint: disable=missing-module-docstring
 
-from typing import Iterator, Any
-
-from . import Posting
+from typing import Iterator
 from .posting import Posting
 
 
@@ -63,23 +61,21 @@ class PostingsMerger:
         All posting lists are assumed sorted in increasing order according
         to the document identifiers.
         """
-        # get hold of the first elements
-        posting1 = next(iter1, None)
-        posting2 = next(iter2, None)
+        current1 = next(iter1, None)
+        current2 = next(iter2, None)
 
-        while posting1 is not None and posting2 is not None:
-            if posting1.document_id == posting2.document_id:
-                freq = max(posting1.term_frequency, posting2.term_frequency) # take the largest frequency
-                common_posting = Posting(posting1.document_id, freq)
-                yield common_posting
-                posting1 = next(iter1, None)
-                posting2 = next(iter2, None)
-            elif posting1.document_id < posting2.document_id:
-                posting1 = next(iter1, None)
+        # We can abort as soon as we exhaust one of the posting lists.
+        while current1 and current2:
+
+            # Increment the smallest one. Yield if we have a match.
+            if current1.document_id == current2.document_id:
+                yield current1
+                current1 = next(iter1, None)
+                current2 = next(iter2, None)
+            elif current1.document_id < current2.document_id:
+                current1 = next(iter1, None)
             else:
-                posting2 = next(iter2, None)
-
-        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+                current2 = next(iter2, None)
 
     @staticmethod
     def union(iter1: Iterator[Posting], iter2: Iterator[Posting]) -> Iterator[Posting]:
@@ -96,35 +92,29 @@ class PostingsMerger:
         All posting lists are assumed sorted in increasing order according
         to the document identifiers.
         """
+        current1 = next(iter1, None)
+        current2 = next(iter2, None)
 
-        posting1 = next(iter1, None)
-        posting2 = next(iter2, None)
+        # First handle the case where neither posting list is exhausted.
+        while current1 and current2:
 
-        while posting1 is not None and posting2 is not None:
-            if posting1.document_id == posting2.document_id:
-                freq = max(posting1.term_frequency, posting2.term_frequency)  # take the largest frequency
-                common_posting = Posting(posting1.document_id, freq)
-                yield common_posting
-                posting1 = next(iter1, None)
-                posting2 = next(iter2, None)
-            elif posting1.document_id < posting2.document_id:
-                yield posting1
-                posting1 = next(iter1, None)
+            # Yield the smallest one.
+            if current1.document_id == current2.document_id:
+                yield current1
+                current1 = next(iter1, None)
+                current2 = next(iter2, None)
+            elif current1.document_id < current2.document_id:
+                yield current1
+                current1 = next(iter1, None)
             else:
-                yield posting2
-                posting2 = next(iter2, None)
+                yield current2
+                current2 = next(iter2, None)
 
-        while posting1 is not None:
-            yield posting1
-            posting1 = next(iter1, None)
-
-        while posting2 is not None:
-            yield posting2
-            posting2 = next(iter2, None)
-
-
-
-        # raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        # We have exhausted at least one of the lists. Yield the remaining tail, if any.
+        current, tail = (current1, iter1) if current1 else (current2, iter2)
+        if current:
+            yield current
+            yield from tail
 
     @staticmethod
     def difference(iter1: Iterator[Posting], iter2: Iterator[Posting]) -> Iterator[Posting]:
@@ -141,23 +131,21 @@ class PostingsMerger:
         All posting lists are assumed sorted in increasing order according
         to the document identifiers.
         """
+        current1 = next(iter1, None)
+        current2 = next(iter2, None)
 
-        posting1 = next(iter1, None)
-        posting2 = next(iter2, None)
+        # First handle the case where neither posting list is exhausted.
+        while current1 and current2:
+            if current1.document_id < current2.document_id:
+                yield current1
+                current1 = next(iter1, None)
+            elif current1.document_id > current2.document_id:
+                current2 = next(iter2, None)
+            else:
+                current1 = next(iter1, None)
+                current2 = next(iter2, None)
 
-        while posting1 is not None and posting2 is not None:
-            if posting1.document_id == posting2.document_id:
-                posting1 = next(iter1, None)
-                posting2 = next(iter2, None)
-            elif posting1.document_id < posting2.document_id: #  doc is only in iter1
-                yield posting1
-                posting1  = next(iter1, None)
-            else: # doc is only in iter2 -- should skip
-                posting2 = next(iter2, None)
-
-
-        while posting1 is not None:
-            yield posting1
-            posting1 = next(iter1, None)
-
-        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        # Yield the remaining elements in the first list, if any.
+        if current1:
+            yield current1
+            yield from iter1

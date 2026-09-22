@@ -7,15 +7,11 @@ import itertools
 from abc import ABC, abstractmethod
 from collections import Counter
 from typing import Iterable, Iterator, List, Tuple
-
-from . import InMemoryDocument
-#from . import DocumentPipeline
 from .dictionary import InMemoryDictionary
-from .analyzer import Analyzer, SimpleAnalyzer
+from .analyzer import Analyzer
 from .corpus import Corpus
 from .posting import Posting
 from .postinglist import CompressedInMemoryPostingList, InMemoryPostingList, PostingList
-from .documentpipeline import DocumentPipeline
 
 
 class InvertedIndex(ABC):
@@ -112,34 +108,13 @@ class InMemoryInvertedIndex(InvertedIndex):
         ranking. See https://nlp.stanford.edu/IR-book/html/htmledition/positional-indexes-1.html for
         further details.
         """
-
-        # mental note:
-        # index =
-        #   dictionary (dict[term, term_id]) +
-        #   posting list (posting = document_id + term_frequency)
-
-        # for each document,
-        #   count term_frequency
-        #   for each (term, freq)
-        #       make posting and add to posting list
-        #       add to dictionary
-
         for document in self._corpus:
-            document_id = document.get_document_id()
-            term_freq = Counter()  # {term : #}
-            for field in fields:
-                field_content = document.get_field(field, "")
-                terms = self.get_terms(field_content)
-                for term in terms:
-                    term_freq[term] += 1
-
-            for term, freq in term_freq.items():
+            all_terms = itertools.chain.from_iterable(self.get_terms(document.get_field(f, "")) for f in fields)
+            term_frequencies = Counter(all_terms)
+            for term, term_frequency in term_frequencies.items():
                 term_id = self._add_to_dictionary(term)
-                self._append_to_posting_list(term_id, document_id, freq, compressed)
-
+                self._append_to_posting_list(term_id, document.document_id, term_frequency, compressed)
         self._finalize_index()
-
-        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
 
     def _add_to_dictionary(self, term: str) -> int:
         """
@@ -155,13 +130,15 @@ class InMemoryInvertedIndex(InvertedIndex):
         must be kept sorted so that we can efficiently traverse and
         merge them when querying the inverted index.
         """
-        new_posting = Posting(document_id, term_frequency)
-
-        while len(self._posting_lists) <= term_id: # hold place up to the current term_id
-            self._posting_lists.append(InMemoryPostingList()) # append empty PL obj.
-        self._posting_lists[term_id].append_posting(new_posting) # append current term_id and freq. to PL
-
-        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        # Locate the posting list for this term. Create it, if needed.
+        assert term_id >= 0
+        assert document_id >= 0
+        assert term_frequency > 0
+        if term_id >= len(self._posting_lists):
+            assert term_id == len(self._posting_lists)
+            self._posting_lists.append(CompressedInMemoryPostingList() if compressed else InMemoryPostingList())
+        posting_list = self._posting_lists[term_id]
+        posting_list.append_posting(Posting(document_id, term_frequency))
 
     def _finalize_index(self) -> None:
         """
@@ -169,10 +146,10 @@ class InMemoryInvertedIndex(InvertedIndex):
         implementations that need it with the chance to tie up any loose ends,
         if needed.
         """
-        for plist in self._posting_lists: # list of Posting objects (document_id, term_frequency)
-            plist._postings.sort(key=lambda posting: posting.document_id)
-
-        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        # For example, if we do compression in chunks or do bit-level compression then there
+        # might be outstanding data to be processed.
+        for posting_list in self._posting_lists:
+            posting_list.finalize_postings()
 
     def get_terms(self, buffer: str) -> Iterator[str]:
         # In a serious large-scale application there could be field- and language-specific
@@ -186,28 +163,18 @@ class InMemoryInvertedIndex(InvertedIndex):
         return (s for s, _ in self._dictionary)
 
     def get_postings_iterator(self, term: str) -> Iterator[Posting]:
-
-        # look the term up in dictionary, get corresponding term
+        # Assume that everything fits in memory. This would not be the case in a serious
+        # large-scale application, even with compression.
         term_id = self._dictionary.get_term_id(term)
-        if term_id is None:
-            return iter([])
-        # get the right posting list
-        plist = self._posting_lists[term_id]
-        # return it as iterator of posting
-        return plist.get_iterator()
-
-        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        return iter([]) if term_id is None else iter(self._posting_lists[term_id])
 
     def get_document_frequency(self, term: str) -> int:
-
-        # = number of postings in a given posting_list
+        # In a serious large-scale application we'd store this number explicitly, e.g., as part of the dictionary.
+        # That way, we can look up the document frequency without having to access the posting lists
+        # themselves. Imagine if the posting lists don't even reside in memory!
         term_id = self._dictionary.get_term_id(term)
-        if term_id is None:
-            return 0
-        plist = self._posting_lists[term_id]
-        return len(plist)
+        return 0 if term_id is None else self._posting_lists[term_id].get_length()
 
-        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
 
 class DummyInMemoryInvertedIndex(InMemoryInvertedIndex):
     """
