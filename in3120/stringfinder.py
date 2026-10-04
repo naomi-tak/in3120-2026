@@ -1,6 +1,7 @@
 # pylint: disable=missing-module-docstring
 # pylint: disable=line-too-long
 # pylint: disable=too-few-public-methods
+# pylint: disable=protected-access
 
 from dataclasses import dataclass
 from typing import Iterator, Any, List
@@ -55,4 +56,68 @@ class StringFinder:
         In a serious application we'd add more lookup/evaluation features, e.g., support for prefix matching,
         support for leftmost-longest matching (instead of reporting all matches), and more.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+        start_state = self._trie # trie root
+        terms_list = list(self._analyzer.terms(buffer))  #[(token, (0, 5)), ...]
+        partial_matches: List[StringFinder.State] = []
+        previous_term_end = None
+
+        for index, (term, (begin, end)) in enumerate(terms_list):
+            matches_for_next_term: List[StringFinder.State] = []
+
+            # Add a space between normal words
+            if previous_term_end is None or previous_term_end == begin:
+                separator = ""
+            else:
+                separator = " "
+
+            input_to_consume = separator + term
+
+            # Keep a match only if it can continue
+            if index < len(terms_list) - 1:  # if this is no the final term
+                next_item = terms_list[index + 1]
+                next_term = next_item[0]
+                next_begin = next_item[1][0]
+
+                # check if the current term ends where the next term begin
+                if end == next_begin: # if no space between the two
+                    next_input = next_term[0]
+                else:
+                    next_input = " " + next_term[0] # if separated with a space, next_input starts with a space
+            else:
+                next_input = None # the last term has no next input
+
+            # extend matches that has already picked up
+            for partial_match in partial_matches:
+                node_after_term = partial_match.node.consume(input_to_consume) # try adding input to this partial match
+                if node_after_term is None: # skip this partial match if None
+                    continue
+
+                matched_text = partial_match.match + input_to_consume
+
+                # node is final: found a dictionary entry
+                if node_after_term.is_final():
+                    surface = " ".join(buffer[partial_match.begin:end].split())
+
+                    yield self.Result(matched_text,node_after_term.get_meta(),surface,partial_match.begin,end)
+
+                # retain the match only when it can consume the actual next input
+                if next_input is not None and node_after_term.consume(next_input) is not None:
+                    matches_for_next_term.append(self.State(node_after_term,partial_match.begin,matched_text))
+
+            # start a new match at the current term
+            node_after_term = start_state.consume(term)
+
+            if node_after_term is not None:
+                # The current term is a dictionary entry
+                if node_after_term.is_final():
+                    surface = " ".join(buffer[begin:end].split())
+                    yield self.Result(term,node_after_term.get_meta(),surface,begin,end)
+
+                # keep it if it can become a longer dictionary entry
+                if next_input is not None and node_after_term.consume(next_input) is not None:
+                    matches_for_next_term.append(self.State(node_after_term,begin,term))
+
+            # alive matches to be used for processing next term
+            partial_matches = matches_for_next_term
+            previous_term_end = end

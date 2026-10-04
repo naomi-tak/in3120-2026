@@ -48,7 +48,20 @@ class SuffixArray:
         Builds a simple suffix array from the set of named fields in the document collection.
         The suffix array allows us to search across all named fields in one go.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+        for document in self._corpus:
+            for field in fields:
+                text = document.get_field(field, None)
+                normalized_text = self._analyzer.join(text) # normalized, joined back together
+                haystack_index = len(self._haystack)  # Each field gets its own haystack entry.
+                self._haystack.append((document.get_document_id(), normalized_text))
+
+                for _term, span in self._analyzer.terms(normalized_text, canonicalize=False):
+                    self._suffixes.append((haystack_index, span[0])) # span is range of positions tuple(int, int)
+
+        self._suffixes.sort(key=self._get_suffix)   # sort by suffix substring
+
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
 
     def _get_suffix(self, pair: Tuple[int, int]) -> str:
         """
@@ -67,4 +80,28 @@ class SuffixArray:
         The matching documents are ranked according to how many times the query substring occurs in the document,
         and only the "best" matches are yielded back to the client. Ties are resolved arbitrarily.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+        normalized_query = self._analyzer.join(query)
+        if normalized_query == "":
+            return
+        start_index = bisect_left(self._suffixes, normalized_query, key=self._get_suffix) # key: comparison function
+        match_counts = Counter()
+
+        for haystack_index, offset in self._suffixes[start_index:]:
+            substring = self._get_suffix((haystack_index, offset))
+            if not substring.startswith(normalized_query):
+                break
+            else:
+                document_id = self._haystack[haystack_index][0]
+                match_counts[document_id] += 1
+
+        if options is None:
+            options = SuffixArray.Options()
+
+        matches_to_return = match_counts.most_common(options.hit_count)
+        for document_id, count in matches_to_return:
+            yield self.Result(self._corpus.get_document(document_id), count)
+
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+
