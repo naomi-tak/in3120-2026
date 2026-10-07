@@ -3,15 +3,20 @@
 # pylint: disable=too-few-public-methods
 # pylint: disable=too-many-locals
 
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
+from math import log
+from select import KQ_NOTE_EXEC
 from typing import Iterator, List, Tuple
+
+from . import SimpleAnalyzer
 from .document import Document
 from .sieve import Sieve
 from .ranker import Ranker
 from .corpus import Corpus
 from .posting import Posting
 from .invertedindex import InvertedIndex
+
 
 
 class SimpleSearchEngine:
@@ -68,13 +73,21 @@ class SimpleSearchEngine:
         Returns the subset of cursors (or, rather, their indices) that are still "alive",
         i.e., the subset of cursors having posting lists that have not yet been exhausted.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
-
+        alive_cursors = []
+        for i, cursor in enumerate(cursors):
+            if cursor.current is not None:
+                alive_cursors.append(i)
+        return alive_cursors
+    
     def _advance(self, cursors: List[Cursor], subset: List[int]) -> None:
         """"
         Advances the given subset of cursors.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        for i in subset:
+            cursor = cursors[i]
+            cursor.current = next(cursor.postings, None)
+
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
 
     def _frontier(self, cursors: List[Cursor], subset: List[int]) -> Tuple[int, List[int]]:
         """
@@ -85,7 +98,26 @@ class SimpleSearchEngine:
         the smallest document identifier. Since posting lists are sorted in ascending order,
         the frontier represents the "leftmost" cursors when scanning from left to right.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        # frontier_doc_id
+        i = subset[0]
+        frontier_doc_id = cursors[i].current.document_id
+
+        for i in subset[1:]:
+            doc_id = cursors[i].current.document_id
+            if doc_id < frontier_doc_id:
+                frontier_doc_id = doc_id
+
+        # cursors positioned at frontier_doc_id
+        frontier_cursors_indices = []
+        for i in subset:
+            if cursors[i].current.document_id == frontier_doc_id:
+                frontier_cursors_indices.append(i)
+
+        return frontier_doc_id, frontier_cursors_indices
+
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+
 
     def evaluate(self, query: str, ranker: Ranker, options: Options | None = None) -> Iterator[Result]:
         """
@@ -95,4 +127,55 @@ class SimpleSearchEngine:
         The matching documents, if any, are ranked by the supplied ranker, and only the "best" matches are yielded
         back to the client.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+        # normalize query
+        analyzer = SimpleAnalyzer()
+        query_normalized = analyzer.join(query).split()
+        multiplicity = Counter(query_normalized)
+        m = len(set(query_normalized))     # num. unique query term
+        t = options.match_threshold
+        n = max(1, min(m, int(t * m)))      # num. terms to be matched
+
+
+        # initialize Cursor obj for each query term
+        cursors = []
+        for term, count in multiplicity.items():
+            postings_iterator = self._inverted_index.get_postings_iterator(term)
+            posting = next(postings_iterator, None) # None if the postingslist is empty
+            cursor = self.Cursor(
+                term=term,
+                multiplicity=count,
+                current=posting,
+                postings=postings_iterator
+            )
+            cursors.append(cursor)
+
+        # DAAT scoring
+        k = options.hit_count if options else 10
+        sieve = Sieve(k)
+        alive_cursors = self._alive(cursors)
+
+        while alive_cursors:
+            frontier_doc_id, frontier_cursors_indices = self._frontier(cursors, alive_cursors)
+
+            if len(frontier_cursors_indices) >= n:  # apply threshold
+                 ranker.reset(frontier_doc_id)
+                 for i in frontier_cursors_indices:
+                     cursor = cursors[i]
+                     ranker.update(term=cursor.term,  # adding query-term-freq x doc-term-freq
+                                   multiplicity=cursor.multiplicity,
+                                   posting=cursor.current)
+
+                 score_per_doc = ranker.evaluate()   # current document's total relevancy score
+                 score_cosine = score_per_doc 
+                 if score_per_doc > 0:
+                     sieve.sift(score_per_doc, frontier_doc_id)     # keeping top-k results
+            self._advance(cursors, frontier_cursors_indices)
+            alive_cursors = self._alive(cursors)
+
+        for score, doc_id in sieve.winners():
+            document = self._corpus.get_document(doc_id)
+            yield self.Result(score, document)
+
+
