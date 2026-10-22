@@ -2,6 +2,8 @@
 # pylint: disable=line-too-long
 
 from __future__ import annotations
+
+import math
 from typing import Iterable, Dict, Tuple
 from math import sqrt
 from .sieve import Sieve
@@ -72,55 +74,121 @@ class SparseDocumentVector:
         Returns the L² norm, also called the Euclidian norm, of the vector. Not to be
         confused with the number of non-zero dimensions in the vector.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        if self._length is None:
+            sum_of_squares = 0.0
+            for weight in self._values.values():
+                squared = weight * weight
+                sum_of_squares += squared
+            self._length = sqrt(sum_of_squares)
+        return self._length
 
     def normalize(self) -> None:
         """
         Divides all weights by the length of the vector, thus rescaling it to
         have unit length.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+        length = self.get_length()
+        if length > 0.0:
+            normalized = {}
+            for term, weight in self._values.items():
+                normalized[term] = weight / length
+                self._values = normalized
+                self._length = None
 
     def top(self, count: int) -> Iterable[Tuple[str, float]]:
         """
         Returns the top weighted terms, i.e., the "most important" terms and their weights.
         The top terms are returned sorted (in descending order) according to their weights.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+        # Sieve: heap-based data structure through which we can "sift" N scored items, and be left with the up to K (item, score) pairs having the largest scores.
+
+        assert count >= 0
+        if count == 0:
+            return []
+        sieve = Sieve(count)
+        for term, weight in self._values.items():
+            sieve.sift(weight, term)
+            
+        for weight, term in sieve.winners():
+            yield term, weight
+
 
     def truncate(self, count: int) -> None:
         """
         Truncates the vector so that it contains no more than the given number of terms,
         by removing the lowest-weighted terms.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        assert count >= 0
+        if count < len(self._values):
+            self._length = None
+            self._values = dict(self.top(count))
 
     def scale(self, factor: float) -> None:
         """
         Multiplies every vector component by the given factor.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        scaled = {}
+        for term, weight in self._values.items():
+            new_weight = weight * factor
+            if new_weight != 0.0:
+                scaled[term] = new_weight
+        self._values = scaled
+        self._length = None
+
 
     def dot(self, other: SparseDocumentVector) -> float:
         """
         Returns the dot product (inner product, scalar product) between this vector
         and the other vector.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        total = 0.0
+        for term, weight in self._values.items():
+            other_vector_weight = other[term]
+            total += weight * other_vector_weight
+        return total
 
     def cosine(self, other: SparseDocumentVector) -> float:
         """
         Returns the cosine of the angle between this vector and the other vector.
         See also https://en.wikipedia.org/wiki/Cosine_similarity.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+
+        my_length = self.get_length()
+        other_vector_length = other.get_length()
+        if my_length == 0.0 or other_vector_length == 0.0:
+            return 0.0
+        return self.dot(other) / (my_length * other_vector_length)
 
     @staticmethod
     def centroid(vectors: Iterable[SparseDocumentVector]) -> SparseDocumentVector:
         """
         Computes the centroid of all the vectors, i.e., the average vector.
         """
-        raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        #raise NotImplementedError("You need to implement this as part of the obligatory assignment.")
+        vectors = list(vectors)
+        vectors_count = len(vectors)
+        summed_weights = {}
+        for vector in vectors:
+            for term, weight in vector:
+                if term in summed_weights:
+                    summed_weights[term] += weight
+                else:
+                    summed_weights[term] = weight
+                    
+        average_weights = {}
+        for term, total_weight in summed_weights.items():
+            average_weights[term] = total_weight / vectors_count
+
+        return SparseDocumentVector(average_weights)      
 
     @staticmethod
     def rocchio(query: SparseDocumentVector, alpha: float, positives: Iterable[SparseDocumentVector], beta: float, negatives: Iterable[SparseDocumentVector], gamma: float) -> SparseDocumentVector:
